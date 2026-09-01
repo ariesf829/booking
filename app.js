@@ -7,6 +7,9 @@ const today = new Date();
 let selectedDate = formatDate(today);
 let selection = null;
 let holdInterval;
+let isSignUp = false;
+let currentUser = JSON.parse(localStorage.getItem('rally-user') || 'null');
+const DEMO_ADMIN = { email: 'admin@rallyreserve.test', password: 'admin123', name: 'Rally Admin', role: 'admin' };
 
 const storedBookings = JSON.parse(localStorage.getItem('rally-bookings') || '[]');
 let bookings = storedBookings.filter(booking => {
@@ -22,6 +25,11 @@ const checkoutModal = document.querySelector('#checkoutModal');
 const checkoutDetails = document.querySelector('#checkoutDetails');
 const bookingCard = document.querySelector('#bookingCard');
 const toast = document.querySelector('#toast');
+const profileButton = document.querySelector('#profileButton');
+const authModal = document.querySelector('#authModal');
+const authForm = document.querySelector('#authForm');
+const adminPanel = document.querySelector('#adminPanel');
+const demoHint = document.querySelector('#demoHint');
 
 function formatDate(date) {
   const year = date.getFullYear();
@@ -76,6 +84,11 @@ function renderSummary() {
 
 function openCheckout() {
   if (!selection) return;
+  if (!currentUser) { authModal.classList.remove('hidden'); showAuthMode(false); return; }
+  showCheckout();
+}
+
+function showCheckout() {
   const court = COURTS.find(item => item.id === selection.courtId);
   checkoutDetails.innerHTML = `<strong>${court.name} · ${String(selection.hour).padStart(2, '0')}:00 - ${String(selection.hour + 1).padStart(2, '0')}:00</strong>${dateLabel(new Date(`${selectedDate}T12:00:00`), { weekday: 'long', month: 'long', day: 'numeric' })} · ₱ 350`;
   checkoutModal.classList.remove('hidden');
@@ -92,6 +105,34 @@ function startTimer() {
 }
 
 function closeCheckout() { clearInterval(holdInterval); checkoutModal.classList.add('hidden'); }
+function showAuthMode(signUp) {
+  isSignUp = signUp;
+  document.querySelector('#authTitle').textContent = signUp ? 'Join the club.' : 'Welcome back.';
+  document.querySelector('#authIntro').textContent = signUp ? 'Create an account to reserve your next hour.' : 'Sign in to manage bookings and reserve your next hour.';
+  document.querySelector('#authSubmit').innerHTML = `${signUp ? 'Create account' : 'Sign in'} <i data-lucide="${signUp ? 'user-plus' : 'log-in'}"></i>`;
+  document.querySelector('#toggleAuth').textContent = signUp ? 'I already have an account' : 'Create a customer account';
+  demoHint.classList.toggle('hidden', signUp);
+  window.lucide?.createIcons();
+}
+function closeAuth() { authModal.classList.add('hidden'); }
+function updateProfile() {
+  profileButton.textContent = currentUser ? (currentUser.name || currentUser.email).slice(0, 2).toUpperCase() : 'JD';
+  profileButton.setAttribute('aria-label', currentUser ? 'Open account menu' : 'Sign in');
+}
+function openAdmin() {
+  adminPanel.classList.remove('hidden');
+  document.querySelector('main').classList.add('hidden');
+  renderAdmin();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function closeAdmin() { adminPanel.classList.add('hidden'); document.querySelector('main').classList.remove('hidden'); }
+function renderAdmin() {
+  const pending = bookings.filter(booking => booking.status === 'pending').length;
+  const confirmed = bookings.filter(booking => booking.status === 'confirmed').length;
+  document.querySelector('#adminStats').innerHTML = `<div><span>Pending review</span><strong>${pending}</strong></div><div><span>Confirmed</span><strong>${confirmed}</strong></div><div><span>Total records</span><strong>${bookings.length}</strong></div>`;
+  document.querySelector('#adminBookingRows').innerHTML = bookings.length ? bookings.slice().sort((a, b) => b.createdAt - a.createdAt).map(booking => { const court = COURTS.find(item => item.id === booking.courtId); return `<tr><td><strong>${booking.fullName || 'Demo customer'}</strong><small>${booking.phone || 'No phone'}</small></td><td>${court?.name || `Court ${booking.courtId}`}<small>${String(booking.hour).padStart(2, '0')}:00 - ${String(booking.hour + 1).padStart(2, '0')}:00</small></td><td>${dateLabel(new Date(`${booking.date}T12:00:00`), { month: 'short', day: 'numeric', year: 'numeric' })}</td><td><small>${booking.reference || 'Proof uploaded'}</small></td><td><span class="status-pill ${booking.status}">${booking.status}</span></td><td>${booking.status === 'pending' ? `<button class="table-action confirm" data-action="confirmed" data-id="${booking.id}">Confirm</button><button class="table-action cancel" data-action="cancelled" data-id="${booking.id}">Cancel</button>` : '<span class="muted-action">No action</span>'}</td></tr>`; }).join('') : '<tr><td colspan="6" class="table-empty">No booking records yet.</td></tr>';
+  document.querySelectorAll('.table-action').forEach(button => button.addEventListener('click', () => { const booking = bookings.find(item => item.id === button.dataset.id); if (booking) { booking.status = button.dataset.action; saveBookings(); renderAdmin(); renderCourts(); renderMyBookings(); showToast(`Booking ${button.dataset.action}.`); } }));
+}
 function saveBookings() { localStorage.setItem('rally-bookings', JSON.stringify(bookings)); }
 function showToast(message) { toast.querySelector('span').textContent = message; toast.classList.remove('hidden'); setTimeout(() => toast.classList.add('hidden'), 4000); }
 
@@ -104,8 +145,31 @@ function renderMyBookings() {
 }
 
 continueButton.addEventListener('click', openCheckout);
+profileButton.addEventListener('click', () => { if (!currentUser) { showAuthMode(false); authModal.classList.remove('hidden'); } else if (currentUser.role === 'admin') openAdmin(); else showToast(`Signed in as ${currentUser.name || currentUser.email}.`); });
 document.querySelector('#closeModal').addEventListener('click', closeCheckout);
+document.querySelector('#closeAuth').addEventListener('click', closeAuth);
+document.querySelector('#toggleAuth').addEventListener('click', () => showAuthMode(!isSignUp));
+document.querySelector('#closeAdmin').addEventListener('click', closeAdmin);
 checkoutModal.addEventListener('click', event => { if (event.target === checkoutModal) closeCheckout(); });
+authModal.addEventListener('click', event => { if (event.target === authModal) closeAuth(); });
+authForm.addEventListener('submit', event => {
+  event.preventDefault();
+  const formData = new FormData(event.currentTarget);
+  const email = formData.get('email').toLowerCase();
+  const password = formData.get('password');
+  if (isSignUp) {
+    currentUser = { email, name: email.split('@')[0], role: 'customer' };
+    showToast('Account created. You are signed in.');
+  } else if (email === DEMO_ADMIN.email && password === DEMO_ADMIN.password) {
+    currentUser = { email: DEMO_ADMIN.email, name: DEMO_ADMIN.name, role: 'admin' };
+    showToast('Admin access granted.');
+  } else {
+    currentUser = { email, name: email.split('@')[0], role: 'customer' };
+    showToast('Signed in in demo mode.');
+  }
+  localStorage.setItem('rally-user', JSON.stringify(currentUser)); updateProfile(); closeAuth();
+  if (selection) showCheckout();
+});
 document.querySelector('#checkoutForm').addEventListener('submit', event => {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
@@ -117,4 +181,5 @@ renderDates();
 renderCourts();
 renderSummary();
 renderMyBookings();
+updateProfile();
 window.lucide?.createIcons();

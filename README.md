@@ -12,6 +12,10 @@ Open `http://localhost:4173`.
 
 The UI runs in demo mode with `localStorage` so the complete booking interaction can be previewed without credentials. The ten-minute pending hold is represented in the browser and expired records remain stored as `cancelled`.
 
+## Demo access
+
+Click the `JD` avatar, then sign in with `admin@rallyreserve.test` and `admin123`. The avatar becomes `RA`; click it again to open the admin booking desk. This demo login is local-only and must be replaced with Supabase Auth before deployment.
+
 ## Supabase handoff
 
 1. Run `supabase.sql` in the Supabase SQL editor.
