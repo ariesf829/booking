@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rally Reserve | Tennis court booking</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { theme: { extend: { colors: { ink: '#102f2b', mint: '#d9f5e8', lime: '#c8f169', coral: '#ff795e', sand: '#f5f1e8' } } } }</script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="Rally Reserve home"><span class="brand-mark">R</span><span>Rally Reserve</span></a>
+      <nav class="desktop-nav" aria-label="Main navigation"><a href="#reserve">Reserve</a><a href="#my-bookings">My bookings</a><a href="#help">Help</a></nav>
+      <button class="avatar-button" id="profileButton" aria-label="Open profile menu">JD</button>
+    </header>
+
+    <main id="top">
+      <section class="hero-band">
+        <div class="hero-copy"><p class="eyebrow">MANILA · OPEN DAILY</p><h1>Your next rally<br><em>starts here.</em></h1><p class="hero-subtitle">Find your hour, bring your game. Two courts, one easy booking.</p></div>
+        <div class="hero-art" aria-hidden="true"><div class="sun-disc"></div><div class="court-lines"><span></span><span></span><span></span></div><div class="tennis-ball"></div></div>
+      </section>
+
+      <section class="booking-section" id="reserve">
+        <div class="section-heading"><div><p class="eyebrow">01 · PICK A TIME</p><h2>Reserve your court</h2></div><div class="timezone">GMT+8 <span class="status-dot"></span></div></div>
+        <div class="date-strip" id="dateStrip" role="tablist" aria-label="Choose a date"></div>
+        <div class="court-grid" id="courtGrid"></div>
+        <div class="booking-summary" id="bookingSummary"><div><span class="summary-label">Selected slot</span><strong id="selectedSlotText">Choose a court and time</strong></div><div class="summary-total"><span>₱ 350 / hour</span><button class="primary-button" id="continueButton" disabled>Continue <i data-lucide="arrow-up-right"></i></button></div></div>
+      </section>
+
+      <section class="lower-section" id="my-bookings"><div class="lower-heading"><p class="eyebrow">YOUR ACTIVITY</p><h2>My bookings</h2></div><div class="booking-card" id="bookingCard"><div class="empty-state"><div class="empty-icon"><i data-lucide="calendar-days"></i></div><div><strong>No active bookings</strong><p>Your upcoming court time will appear here.</p></div></div></div></section>
+      <section class="info-band" id="help"><div><p class="eyebrow">PLAY WITH CONFIDENCE</p><h2>Simple rules.<br>Good rallies.</h2></div><div class="rule-list"><div><span>01</span><p>Bookings are held for 10 minutes while you complete payment.</p></div><div><span>02</span><p>Pay via GCash and upload your receipt to lock in your slot.</p></div><div><span>03</span><p>Need a hand? Message us at <strong>+63 917 555 0142</strong>.</p></div></div></section>
+    </main>
+
+    <div class="modal-backdrop hidden" id="checkoutModal" role="dialog" aria-modal="true" aria-labelledby="checkoutTitle"><div class="modal"><button class="modal-close" id="closeModal" aria-label="Close checkout"><i data-lucide="x"></i></button><p class="eyebrow">02 · SECURE YOUR HOUR</p><h2 id="checkoutTitle">Almost on court.</h2><p class="modal-intro">Your slot is held for <strong id="holdTimer">10:00</strong>. Complete your details and payment proof before the timer runs out.</p><div class="checkout-details" id="checkoutDetails"></div><form id="checkoutForm"><label>Full name<input required name="fullName" placeholder="Juan Dela Cruz"></label><label>Mobile number<input required name="phone" type="tel" placeholder="09XX XXX XXXX"></label><label>GCash reference number<input required name="reference" placeholder="Enter reference number"></label><label class="upload-label">Payment screenshot<input required name="proof" type="file" accept="image/*"><span class="upload-box"><i data-lucide="upload-cloud"></i>Tap to upload screenshot</span></label><button class="primary-button full-button" type="submit">Submit booking <i data-lucide="arrow-up-right"></i></button></form></div></div>
+
+    <div class="toast hidden" id="toast" role="status"><i data-lucide="check-circle-2"></i><span></span></div>
+    <footer><span>© 2026 Rally Reserve</span><span>Made for the love of the game</span></footer>
+  </div>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
