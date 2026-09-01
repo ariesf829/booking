@@ -1,3 +1,7 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const HOURS = Array.from({ length: 15 }, (_, index) => index + 7);
 const COURTS = [
   { id: 1, name: 'Court 1', detail: 'Outdoor · acrylic surface' },
