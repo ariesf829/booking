@@ -35,6 +35,25 @@ create policy "Customers view own bookings" on public.bookings for select using 
 create policy "Customers create own bookings" on public.bookings for insert with check (auth.uid() = user_id);
 create policy "Customers update own pending bookings" on public.bookings for update using (auth.uid() = user_id and status = 'pending');
 
+create or replace function public.is_admin()
+returns boolean language sql security definer set search_path = public as $$
+  select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin');
+$$;
+
+create policy "Admins can view all bookings" on public.bookings for select using (public.is_admin());
+create policy "Admins can update bookings" on public.bookings for update using (public.is_admin()) with check (public.is_admin());
+
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, full_name, phone_number)
+  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', 'New customer'), coalesce(new.raw_user_meta_data->>'phone_number', ''));
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
+
 create or replace function public.expire_pending_bookings()
 returns void language sql security definer set search_path = public as $$
   update public.bookings set status = 'cancelled'

@@ -14,7 +14,7 @@ The UI runs in demo mode with `localStorage` so the complete booking interaction
 
 ## Demo access
 
-Click the `JD` avatar, then sign in with `admin@rallyreserve.test` and `admin123`. The avatar becomes `RA`; click it again to open the admin booking desk. This demo login is local-only and must be replaced with Supabase Auth before deployment.
+Click the `JD` avatar, then sign in with `admin@rallyreserve.test` and `admin123`. The avatar becomes `RA`; click it again to open the admin booking desk. When Supabase is configured, registration and sign-in use Supabase Auth. The local demo login is available only while `config.js` contains placeholders.
 
 ## Supabase handoff
 

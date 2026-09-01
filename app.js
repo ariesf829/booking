@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const SUPABASE_CONFIGURED = !SUPABASE_URL.includes('your-project') && !SUPABASE_ANON_KEY.includes('your-anon-public-key');
 const HOURS = Array.from({ length: 15 }, (_, index) => index + 7);
 const COURTS = [
   { id: 1, name: 'Court 1', detail: 'Outdoor · acrylic surface' },
@@ -64,6 +65,21 @@ function renderDates() {
 
 function isUnavailable(courtId, hour) {
   return bookings.some(booking => booking.date === selectedDate && booking.courtId === courtId && booking.hour === hour && ['pending', 'confirmed'].includes(booking.status));
+}
+
+function normalizeBooking(booking) {
+  return { ...booking, courtId: booking.courtId ?? booking.court_number, hour: booking.hour ?? booking.start_hour, date: booking.date ?? booking.booking_date, createdAt: booking.createdAt ?? new Date(booking.created_at).getTime(), fullName: booking.fullName ?? booking.profiles?.full_name, phone: booking.phone ?? booking.profiles?.phone_number, reference: booking.reference ?? booking.gcash_reference };
+}
+
+async function loadBookings() {
+  if (!SUPABASE_CONFIGURED || !currentUser) return;
+  let query = supabase.from('bookings').select('*, profiles(full_name, phone_number)').order('created_at', { ascending: false });
+  if (currentUser.role !== 'admin') query = query.eq('user_id', currentUser.id);
+  const { data, error } = await query;
+  if (error) { showToast(error.message); return; }
+  bookings = (data || []).map(normalizeBooking);
+  renderCourts(); renderMyBookings();
+  if (currentUser.role === 'admin' && !adminPanel.classList.contains('hidden')) renderAdmin();
 }
 
 function renderCourts() {
@@ -135,7 +151,7 @@ function renderAdmin() {
   const confirmed = bookings.filter(booking => booking.status === 'confirmed').length;
   document.querySelector('#adminStats').innerHTML = `<div><span>Pending review</span><strong>${pending}</strong></div><div><span>Confirmed</span><strong>${confirmed}</strong></div><div><span>Total records</span><strong>${bookings.length}</strong></div>`;
   document.querySelector('#adminBookingRows').innerHTML = bookings.length ? bookings.slice().sort((a, b) => b.createdAt - a.createdAt).map(booking => { const court = COURTS.find(item => item.id === booking.courtId); return `<tr><td><strong>${booking.fullName || 'Demo customer'}</strong><small>${booking.phone || 'No phone'}</small></td><td>${court?.name || `Court ${booking.courtId}`}<small>${String(booking.hour).padStart(2, '0')}:00 - ${String(booking.hour + 1).padStart(2, '0')}:00</small></td><td>${dateLabel(new Date(`${booking.date}T12:00:00`), { month: 'short', day: 'numeric', year: 'numeric' })}</td><td><small>${booking.reference || 'Proof uploaded'}</small></td><td><span class="status-pill ${booking.status}">${booking.status}</span></td><td>${booking.status === 'pending' ? `<button class="table-action confirm" data-action="confirmed" data-id="${booking.id}">Confirm</button><button class="table-action cancel" data-action="cancelled" data-id="${booking.id}">Cancel</button>` : '<span class="muted-action">No action</span>'}</td></tr>`; }).join('') : '<tr><td colspan="6" class="table-empty">No booking records yet.</td></tr>';
-  document.querySelectorAll('.table-action').forEach(button => button.addEventListener('click', () => { const booking = bookings.find(item => item.id === button.dataset.id); if (booking) { booking.status = button.dataset.action; saveBookings(); renderAdmin(); renderCourts(); renderMyBookings(); showToast(`Booking ${button.dataset.action}.`); } }));
+  document.querySelectorAll('.table-action').forEach(button => button.addEventListener('click', async () => { const booking = bookings.find(item => item.id === button.dataset.id); if (!booking) return; if (SUPABASE_CONFIGURED) { const { error } = await supabase.from('bookings').update({ status: button.dataset.action, ...(button.dataset.action === 'confirmed' ? { confirmed_at: new Date().toISOString() } : {}) }).eq('id', booking.id); if (error) { showToast(error.message); return; } await loadBookings(); } else { booking.status = button.dataset.action; saveBookings(); renderAdmin(); renderCourts(); renderMyBookings(); } showToast(`Booking ${button.dataset.action}.`); }));
 }
 function saveBookings() { localStorage.setItem('rally-bookings', JSON.stringify(bookings)); }
 function showToast(message) { toast.querySelector('span').textContent = message; toast.classList.remove('hidden'); setTimeout(() => toast.classList.add('hidden'), 4000); }
@@ -156,12 +172,24 @@ document.querySelector('#toggleAuth').addEventListener('click', () => showAuthMo
 document.querySelector('#closeAdmin').addEventListener('click', closeAdmin);
 checkoutModal.addEventListener('click', event => { if (event.target === checkoutModal) closeCheckout(); });
 authModal.addEventListener('click', event => { if (event.target === authModal) closeAuth(); });
-authForm.addEventListener('submit', event => {
+authForm.addEventListener('submit', async event => {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
   const email = formData.get('email').toLowerCase();
   const password = formData.get('password');
-  if (isSignUp) {
+  if (SUPABASE_CONFIGURED) {
+    let result;
+    if (isSignUp) {
+      result = await supabase.auth.signUp({ email, password, options: { data: { full_name: email.split('@')[0], phone_number: '' } } });
+    } else {
+      result = await supabase.auth.signInWithPassword({ email, password });
+    }
+    if (result.error) { showToast(result.error.message); return; }
+    currentUser = result.data.user;
+    const { data: profile } = await supabase.from('profiles').select('full_name, role').eq('id', currentUser.id).single();
+    currentUser.name = profile?.full_name || currentUser.user_metadata?.full_name || email.split('@')[0];
+    currentUser.role = profile?.role || 'customer';
+  } else if (isSignUp) {
     currentUser = { email, name: email.split('@')[0], role: 'customer' };
     showToast('Account created. You are signed in.');
   } else if (email === DEMO_ADMIN.email && password === DEMO_ADMIN.password) {
@@ -172,13 +200,25 @@ authForm.addEventListener('submit', event => {
     showToast('Signed in in demo mode.');
   }
   localStorage.setItem('rally-user', JSON.stringify(currentUser)); updateProfile(); closeAuth();
+  await loadBookings();
   if (selection) showCheckout();
 });
-document.querySelector('#checkoutForm').addEventListener('submit', event => {
+document.querySelector('#checkoutForm').addEventListener('submit', async event => {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
-  bookings.push({ id: crypto.randomUUID(), ...selection, date: selectedDate, fullName: formData.get('fullName'), phone: formData.get('phone'), reference: formData.get('reference'), status: 'pending', createdAt: Date.now() });
-  saveBookings(); renderCourts(); renderMyBookings(); selection = null; renderSummary(); closeCheckout(); event.currentTarget.reset(); showToast('Booking held. Upload received for review.');
+  if (SUPABASE_CONFIGURED) {
+    const proof = formData.get('proof');
+    const proofPath = `${currentUser.id}/${crypto.randomUUID()}-${proof.name}`;
+    const upload = await supabase.storage.from('payment-proofs').upload(proofPath, proof);
+    if (upload.error) { showToast(upload.error.message); return; }
+    const { error } = await supabase.from('bookings').insert({ user_id: currentUser.id, court_number: selection.courtId, booking_date: selectedDate, start_hour: selection.hour, gcash_reference: formData.get('reference'), payment_proof_path: proofPath, status: 'pending' });
+    if (error) { showToast(error.message); return; }
+    await loadBookings();
+  } else {
+    bookings.push({ id: crypto.randomUUID(), ...selection, date: selectedDate, fullName: formData.get('fullName'), phone: formData.get('phone'), reference: formData.get('reference'), status: 'pending', createdAt: Date.now() });
+    saveBookings(); renderCourts(); renderMyBookings();
+  }
+  selection = null; renderSummary(); closeCheckout(); event.currentTarget.reset(); showToast('Booking held. Upload received for review.');
 });
 
 renderDates();
@@ -187,3 +227,23 @@ renderSummary();
 renderMyBookings();
 updateProfile();
 window.lucide?.createIcons();
+
+async function initializeAuth() {
+  if (!SUPABASE_CONFIGURED) return;
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) {
+    currentUser = session.user;
+    const { data: profile } = await supabase.from('profiles').select('full_name, role').eq('id', currentUser.id).single();
+    currentUser.name = profile?.full_name || currentUser.email;
+    currentUser.role = profile?.role || 'customer';
+    updateProfile();
+    await loadBookings();
+  }
+  supabase.auth.onAuthStateChange((_event, sessionChange) => {
+    currentUser = sessionChange?.user || null;
+    if (!currentUser) { bookings = []; renderCourts(); renderMyBookings(); }
+    updateProfile();
+  });
+}
+
+initializeAuth();
