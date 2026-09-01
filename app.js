@@ -238,6 +238,13 @@ async function initializeAuth() {
     currentUser.role = profile?.role || 'customer';
     updateProfile();
     await loadBookings();
+  } else {
+    currentUser = null;
+    localStorage.removeItem('rally-user');
+    bookings = [];
+    updateProfile();
+    renderCourts();
+    renderMyBookings();
   }
   supabase.auth.onAuthStateChange((_event, sessionChange) => {
     currentUser = sessionChange?.user || null;
