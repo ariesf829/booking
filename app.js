@@ -170,6 +170,20 @@ function renderAdmin() {
 function saveBookings() { localStorage.setItem('rally-bookings', JSON.stringify(bookings)); }
 function showToast(message) { toast.querySelector('span').textContent = message; toast.classList.remove('hidden'); setTimeout(() => toast.classList.add('hidden'), 4000); }
 
+function handleAuthError(error) {
+  const message = error?.message || 'Authentication failed.';
+  const normalized = message.toLowerCase();
+  if (normalized.includes('rate limit') || normalized.includes('too many requests') || error?.status === 429) {
+    showToast('Email rate limit reached. Please wait a few minutes and try again, or use the demo admin login.');
+    return;
+  }
+  if (normalized.includes('user already registered')) {
+    showToast('This email is already registered. Please sign in instead.');
+    return;
+  }
+  showToast(message);
+}
+
 function renderMyBookings() {
   const active = bookings.filter(booking => ['pending', 'confirmed'].includes(booking.status)).sort((a, b) => b.createdAt - a.createdAt)[0];
   if (!active) { bookingCard.innerHTML = '<div class="empty-state"><div class="empty-icon"><i data-lucide="calendar-days"></i></div><div><strong>No active bookings</strong><p>Your upcoming court time will appear here.</p></div></div>'; window.lucide?.createIcons(); return; }
@@ -199,7 +213,7 @@ authForm.addEventListener('submit', async event => {
     } else {
       result = await supabase.auth.signInWithPassword({ email, password });
     }
-    if (result.error) { showToast(result.error.message); return; }
+    if (result.error) { handleAuthError(result.error); return; }
     currentUser = result.data.user;
     const { data: profile } = await supabase.from('profiles').select('full_name, role').eq('id', currentUser.id).single();
     currentUser.name = profile?.full_name || currentUser.user_metadata?.full_name || email.split('@')[0];
