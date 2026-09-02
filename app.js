@@ -31,6 +31,7 @@ const checkoutDetails = document.querySelector('#checkoutDetails');
 const bookingCard = document.querySelector('#bookingCard');
 const toast = document.querySelector('#toast');
 const profileButton = document.querySelector('#profileButton');
+const logoutButton = document.querySelector('#logoutButton');
 const authModal = document.querySelector('#authModal');
 const authForm = document.querySelector('#authForm');
 const adminPanel = document.querySelector('#adminPanel');
@@ -138,6 +139,19 @@ function closeAuth() { authModal.classList.add('hidden'); }
 function updateProfile() {
   profileButton.textContent = currentUser ? (currentUser.name || currentUser.email).slice(0, 2).toUpperCase() : 'JD';
   profileButton.setAttribute('aria-label', currentUser ? 'Open account menu' : 'Sign in');
+  logoutButton.classList.toggle('hidden', !currentUser);
+}
+function handleLogout() {
+  if (SUPABASE_CONFIGURED) {
+    supabase.auth.signOut().catch(() => {});
+  }
+  currentUser = null;
+  localStorage.removeItem('rally-user');
+  updateProfile();
+  closeAuth();
+  closeCheckout();
+  closeAdmin();
+  showToast('You have been signed out.');
 }
 function openAdmin() {
   adminPanel.classList.remove('hidden');
@@ -166,6 +180,7 @@ function renderMyBookings() {
 
 continueButton.addEventListener('click', openCheckout);
 profileButton.addEventListener('click', () => { if (!currentUser) { showAuthMode(false); authModal.classList.remove('hidden'); } else if (currentUser.role === 'admin') openAdmin(); else showToast(`Signed in as ${currentUser.name || currentUser.email}.`); });
+logoutButton.addEventListener('click', handleLogout);
 document.querySelector('#closeModal').addEventListener('click', closeCheckout);
 document.querySelector('#closeAuth').addEventListener('click', closeAuth);
 document.querySelector('#toggleAuth').addEventListener('click', () => showAuthMode(!isSignUp));
