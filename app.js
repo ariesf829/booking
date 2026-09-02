@@ -255,6 +255,15 @@ function handleAuthError(error) {
   showToast(message);
 }
 
+function handleBookingError(error) {
+  const message = error?.message || 'Unable to submit booking.';
+  if (message.toLowerCase().includes('row-level security') || message.toLowerCase().includes('policy')) {
+    showToast('Supabase blocked the booking because the logged-in user is not allowed to insert into bookings. Check the auth session and the bookings insert policy.');
+    return;
+  }
+  showToast(message);
+}
+
 function resetReceiptPreview() {
   checkoutReceiptPreview.src = '';
   receiptPreviewShell.classList.add('hidden');
@@ -317,6 +326,10 @@ authForm.addEventListener('submit', async event => {
 });
 document.querySelector('#checkoutForm').addEventListener('submit', async event => {
   event.preventDefault();
+  if (!currentUser?.id) {
+    showToast('Please sign in again before submitting a booking.');
+    return;
+  }
   const formData = new FormData(event.currentTarget);
   const proof = formData.get('proof');
   if (!proof || !proof.name) {
@@ -331,7 +344,7 @@ document.querySelector('#checkoutForm').addEventListener('submit', async event =
     const upload = await supabase.storage.from('payment-proofs').upload(paymentProofPath, proof);
     if (upload.error) { showToast(upload.error.message); return; }
     const { error } = await supabase.from('bookings').insert(bookingRows);
-    if (error) { showToast(error.message); return; }
+    if (error) { handleBookingError(error); return; }
     await loadBookings();
   } else {
     selection.forEach(slot => {
