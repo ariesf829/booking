@@ -2,15 +2,17 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const SUPABASE_CONFIGURED = !SUPABASE_URL.includes('your-project') && !SUPABASE_ANON_KEY.includes('your-anon-public-key');
+const USE_SUPABASE_AUTH = false;
+const SUPABASE_CONFIGURED = USE_SUPABASE_AUTH && !SUPABASE_URL.includes('your-project') && !SUPABASE_ANON_KEY.includes('your-anon-public-key');
 const HOURS = Array.from({ length: 15 }, (_, index) => index + 7);
 const COURTS = [
   { id: 1, name: 'Court 1', detail: 'Outdoor · acrylic surface' },
   { id: 2, name: 'Court 2', detail: 'Outdoor · acrylic surface' }
 ];
+const BOOKING_RATE = 350;
 const today = new Date();
 let selectedDate = formatDate(today);
-let selection = null;
+let selection = [];
 let holdInterval;
 let isSignUp = false;
 let currentUser = JSON.parse(localStorage.getItem('rally-user') || 'null');
@@ -21,6 +23,7 @@ let bookings = storedBookings.filter(booking => {
   if (booking.status === 'pending' && Date.now() - booking.createdAt >= 10 * 60 * 1000) booking.status = 'cancelled';
   return true;
 });
+pruneExpiredReceipts();
 
 const dateStrip = document.querySelector('#dateStrip');
 const courtGrid = document.querySelector('#courtGrid');
@@ -35,6 +38,12 @@ const logoutButton = document.querySelector('#logoutButton');
 const authModal = document.querySelector('#authModal');
 const authForm = document.querySelector('#authForm');
 const adminPanel = document.querySelector('#adminPanel');
+const receiptModal = document.querySelector('#receiptModal');
+const receiptPreviewImage = document.querySelector('#receiptPreviewImage');
+const receiptMetaText = document.querySelector('#receiptMetaText');
+const checkoutReceiptPreview = document.querySelector('#checkoutReceiptPreview');
+const receiptPreviewShell = document.querySelector('#receiptPreviewShell');
+const clearReceiptButton = document.querySelector('#clearReceiptButton');
 const demoHint = document.querySelector('#demoHint');
 
 function formatDate(date) {
@@ -64,8 +73,17 @@ function renderDates() {
   }));
 }
 
+function slotKey(courtId, hour) {
+  return `${courtId}:${hour}`;
+}
+
+function isSelectedSlot(courtId, hour) {
+  return selection.some(item => item.courtId === courtId && item.hour === hour);
+}
+
 function isUnavailable(courtId, hour) {
-  return bookings.some(booking => booking.date === selectedDate && booking.courtId === courtId && booking.hour === hour && ['pending', 'confirmed'].includes(booking.status));
+  const selectedKeys = new Set(selection.map(item => slotKey(item.courtId, item.hour)));
+  return bookings.some(booking => booking.date === selectedDate && booking.courtId === courtId && booking.hour === hour && ['pending', 'confirmed'].includes(booking.status) && !selectedKeys.has(slotKey(courtId, hour)));
 }
 
 function normalizeBooking(booking) {
@@ -84,34 +102,45 @@ async function loadBookings() {
 }
 
 function renderCourts() {
-  courtGrid.innerHTML = COURTS.map(court => `<article class="court-card"><div class="court-card-header"><div><h3>${court.name}</h3><small>${court.detail}</small></div><span class="court-badge">AVAILABLE</span></div><div class="slot-grid">${HOURS.map(hour => { const unavailable = isUnavailable(court.id, hour); const active = selection?.courtId === court.id && selection?.hour === hour; return `<button class="slot-button ${unavailable ? 'booked' : ''} ${active ? 'selected' : ''}" ${unavailable ? 'disabled' : ''} data-court="${court.id}" data-hour="${hour}">${String(hour).padStart(2, '0')}:00</button>`; }).join('')}</div></article>`).join('');
+  courtGrid.innerHTML = COURTS.map(court => `<article class="court-card"><div class="court-card-header"><div><h3>${court.name}</h3><small>${court.detail}</small></div><span class="court-badge">AVAILABLE</span></div><div class="slot-grid">${HOURS.map(hour => { const unavailable = isUnavailable(court.id, hour); const active = isSelectedSlot(court.id, hour); return `<button class="slot-button ${unavailable ? 'booked' : ''} ${active ? 'selected' : ''}" ${unavailable ? 'disabled' : ''} data-court="${court.id}" data-hour="${hour}">${String(hour).padStart(2, '0')}:00</button>`; }).join('')}</div></article>`).join('');
   courtGrid.querySelectorAll('.slot-button:not(:disabled)').forEach(button => button.addEventListener('click', () => {
-    selection = { courtId: Number(button.dataset.court), hour: Number(button.dataset.hour) };
+    const courtId = Number(button.dataset.court);
+    const hour = Number(button.dataset.hour);
+    const index = selection.findIndex(item => item.courtId === courtId && item.hour === hour);
+    if (index >= 0) {
+      selection.splice(index, 1);
+    } else {
+      selection.push({ courtId, hour });
+    }
     renderCourts();
     renderSummary();
   }));
 }
 
 function renderSummary() {
-  if (!selection) {
+  if (!selection.length) {
     selectedSlotText.textContent = 'Choose a court and time';
     continueButton.disabled = true;
     return;
   }
-  const court = COURTS.find(item => item.id === selection.courtId);
-  selectedSlotText.textContent = `${court.name} · ${String(selection.hour).padStart(2, '0')}:00 · ${dateLabel(new Date(`${selectedDate}T12:00:00`), { month: 'short', day: 'numeric' })}`;
+  const total = selection.length * BOOKING_RATE;
+  selectedSlotText.textContent = `${selection.length} slot${selection.length > 1 ? 's' : ''} selected · ${selection.length > 1 ? `₱ ${total}` : `₱ ${BOOKING_RATE}`}`;
   continueButton.disabled = false;
 }
 
 function openCheckout() {
-  if (!selection) return;
+  if (!selection.length) return;
   if (!currentUser) { authModal.classList.remove('hidden'); showAuthMode(false); return; }
   showCheckout();
 }
 
 function showCheckout() {
-  const court = COURTS.find(item => item.id === selection.courtId);
-  checkoutDetails.innerHTML = `<strong>${court.name} · ${String(selection.hour).padStart(2, '0')}:00 - ${String(selection.hour + 1).padStart(2, '0')}:00</strong>${dateLabel(new Date(`${selectedDate}T12:00:00`), { weekday: 'long', month: 'long', day: 'numeric' })} · ₱ 350`;
+  const slotSummary = selection.map(slot => {
+    const court = COURTS.find(item => item.id === slot.courtId);
+    return `<div><strong>${court.name} · ${String(slot.hour).padStart(2, '0')}:00 - ${String(slot.hour + 1).padStart(2, '0')}:00</strong></div>`;
+  }).join('');
+  const total = selection.length * BOOKING_RATE;
+  checkoutDetails.innerHTML = `${slotSummary}<div class="checkout-total">${dateLabel(new Date(`${selectedDate}T12:00:00`), { weekday: 'long', month: 'long', day: 'numeric' })} · Total: ₱ ${total}</div>`;
   checkoutModal.classList.remove('hidden');
   startTimer();
 }
@@ -160,15 +189,57 @@ function openAdmin() {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 function closeAdmin() { adminPanel.classList.add('hidden'); document.querySelector('main').classList.remove('hidden'); }
+function pruneExpiredReceipts() {
+  const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
+  bookings = bookings.map(booking => {
+    if (!booking.proofDataUrl) return booking;
+    if (Date.now() - Number(booking.createdAt || 0) > oneMonthMs) {
+      return { ...booking, proofDataUrl: '', reference: booking.reference || 'Receipt expired' };
+    }
+    return booking;
+  });
+  saveBookings();
+}
+
+function openReceiptPreview(bookingId) {
+  const booking = bookings.find(item => item.id === bookingId);
+  if (!booking || !booking.proofDataUrl) {
+    showToast('No receipt uploaded for this booking.');
+    return;
+  }
+  receiptPreviewImage.src = booking.proofDataUrl;
+  receiptMetaText.textContent = `${booking.fullName || 'Customer'} · ${booking.reference || 'GCash reference'} · ${dateLabel(new Date(`${booking.date}T12:00:00`), { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  receiptModal.classList.remove('hidden');
+}
+
 function renderAdmin() {
   const pending = bookings.filter(booking => booking.status === 'pending').length;
   const confirmed = bookings.filter(booking => booking.status === 'confirmed').length;
   document.querySelector('#adminStats').innerHTML = `<div><span>Pending review</span><strong>${pending}</strong></div><div><span>Confirmed</span><strong>${confirmed}</strong></div><div><span>Total records</span><strong>${bookings.length}</strong></div>`;
-  document.querySelector('#adminBookingRows').innerHTML = bookings.length ? bookings.slice().sort((a, b) => b.createdAt - a.createdAt).map(booking => { const court = COURTS.find(item => item.id === booking.courtId); return `<tr><td><strong>${booking.fullName || 'Demo customer'}</strong><small>${booking.phone || 'No phone'}</small></td><td>${court?.name || `Court ${booking.courtId}`}<small>${String(booking.hour).padStart(2, '0')}:00 - ${String(booking.hour + 1).padStart(2, '0')}:00</small></td><td>${dateLabel(new Date(`${booking.date}T12:00:00`), { month: 'short', day: 'numeric', year: 'numeric' })}</td><td><small>${booking.reference || 'Proof uploaded'}</small></td><td><span class="status-pill ${booking.status}">${booking.status}</span></td><td>${booking.status === 'pending' ? `<button class="table-action confirm" data-action="confirmed" data-id="${booking.id}">Confirm</button><button class="table-action cancel" data-action="cancelled" data-id="${booking.id}">Cancel</button>` : '<span class="muted-action">No action</span>'}</td></tr>`; }).join('') : '<tr><td colspan="6" class="table-empty">No booking records yet.</td></tr>';
-  document.querySelectorAll('.table-action').forEach(button => button.addEventListener('click', async () => { const booking = bookings.find(item => item.id === button.dataset.id); if (!booking) return; if (SUPABASE_CONFIGURED) { const { error } = await supabase.from('bookings').update({ status: button.dataset.action, ...(button.dataset.action === 'confirmed' ? { confirmed_at: new Date().toISOString() } : {}) }).eq('id', booking.id); if (error) { showToast(error.message); return; } await loadBookings(); } else { booking.status = button.dataset.action; saveBookings(); renderAdmin(); renderCourts(); renderMyBookings(); } showToast(`Booking ${button.dataset.action}.`); }));
+  document.querySelector('#adminBookingRows').innerHTML = bookings.length ? bookings.slice().sort((a, b) => b.createdAt - a.createdAt).map(booking => { const court = COURTS.find(item => item.id === booking.courtId); const paymentCell = booking.proofDataUrl ? `<div class="receipt-meta"><img class="receipt-thumb" src="${booking.proofDataUrl}" alt="Payment receipt"><small>${booking.reference || 'Proof uploaded'}</small></div>` : `<small>${booking.reference || 'Proof uploaded'}</small>`; return `<tr><td><strong>${booking.fullName || 'Demo customer'}</strong><small>${booking.phone || 'No phone'}</small></td><td>${court?.name || `Court ${booking.courtId}`}<small>${String(booking.hour).padStart(2, '0')}:00 - ${String(booking.hour + 1).padStart(2, '0')}:00</small></td><td>${dateLabel(new Date(`${booking.date}T12:00:00`), { month: 'short', day: 'numeric', year: 'numeric' })}</td><td>${paymentCell}</td><td><span class="status-pill ${booking.status}">${booking.status}</span></td><td><div class="action-stack">${booking.proofDataUrl ? `<button class="table-action preview" data-action="preview" data-id="${booking.id}">Preview</button>` : ''}${booking.status === 'pending' ? `<button class="table-action confirm" data-action="confirmed" data-id="${booking.id}">Confirm</button><button class="table-action cancel" data-action="cancelled" data-id="${booking.id}">Cancel</button>` : '<span class="muted-action">No action</span>'}</div></td></tr>`; }).join('') : '<tr><td colspan="6" class="table-empty">No booking records yet.</td></tr>';
+  document.querySelectorAll('.table-action').forEach(button => {
+    button.addEventListener('click', async () => {
+      const booking = bookings.find(item => item.id === button.dataset.id);
+      if (!booking) return;
+      if (button.dataset.action === 'preview') {
+        openReceiptPreview(booking.id);
+        return;
+      }
+      if (SUPABASE_CONFIGURED) { const { error } = await supabase.from('bookings').update({ status: button.dataset.action, ...(button.dataset.action === 'confirmed' ? { confirmed_at: new Date().toISOString() } : {}) }).eq('id', booking.id); if (error) { showToast(error.message); return; } await loadBookings(); } else { booking.status = button.dataset.action; saveBookings(); renderAdmin(); renderCourts(); renderMyBookings(); } showToast(`Booking ${button.dataset.action}.`); });
+  });
 }
 function saveBookings() { localStorage.setItem('rally-bookings', JSON.stringify(bookings)); }
 function showToast(message) { toast.querySelector('span').textContent = message; toast.classList.remove('hidden'); setTimeout(() => toast.classList.add('hidden'), 4000); }
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) { resolve(''); return; }
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Unable to read uploaded receipt.'));
+    reader.readAsDataURL(file);
+  });
+}
 
 function handleAuthError(error) {
   const message = error?.message || 'Authentication failed.';
@@ -184,19 +255,31 @@ function handleAuthError(error) {
   showToast(message);
 }
 
+function resetReceiptPreview() {
+  checkoutReceiptPreview.src = '';
+  receiptPreviewShell.classList.add('hidden');
+  const fileInput = document.querySelector('#checkoutForm input[name="proof"]');
+  if (fileInput) fileInput.value = '';
+}
+
 function renderMyBookings() {
+  pruneExpiredReceipts();
   const active = bookings.filter(booking => ['pending', 'confirmed'].includes(booking.status)).sort((a, b) => b.createdAt - a.createdAt)[0];
   if (!active) { bookingCard.innerHTML = '<div class="empty-state"><div class="empty-icon"><i data-lucide="calendar-days"></i></div><div><strong>No active bookings</strong><p>Your upcoming court time will appear here.</p></div></div>'; window.lucide?.createIcons(); return; }
   const court = COURTS.find(item => item.id === active.courtId);
   const statusLabel = active.status === 'pending' ? 'PAYMENT PENDING' : 'CONFIRMED';
-  bookingCard.innerHTML = `<div class="booking-item"><div><span class="court-badge">${statusLabel}</span><h3>${court.name} · ${String(active.hour).padStart(2, '0')}:00</h3><p>${dateLabel(new Date(`${active.date}T12:00:00`), { weekday: 'long', month: 'short', day: 'numeric' })}</p></div><strong>₱ 350</strong></div>`;
+  const receiptMarkup = active.proofDataUrl ? `<div class="booking-receipt"><img src="${active.proofDataUrl}" alt="Payment receipt"><div><span>GCash ref</span><strong>${active.reference || 'Not provided'}</strong></div></div>` : active.reference ? `<div class="booking-meta"><span>GCash ref</span><strong>${active.reference}</strong></div>` : '<div class="booking-meta"><span>GCash ref</span><strong>Pending upload</strong></div>';
+  bookingCard.innerHTML = `<div class="booking-item"><div><span class="court-badge">${statusLabel}</span><h3>${court.name} · ${String(active.hour).padStart(2, '0')}:00</h3><p>${dateLabel(new Date(`${active.date}T12:00:00`), { weekday: 'long', month: 'short', day: 'numeric' })}</p>${receiptMarkup}</div><strong>₱ 350</strong></div>`;
 }
 
 continueButton.addEventListener('click', openCheckout);
 profileButton.addEventListener('click', () => { if (!currentUser) { showAuthMode(false); authModal.classList.remove('hidden'); } else if (currentUser.role === 'admin') openAdmin(); else showToast(`Signed in as ${currentUser.name || currentUser.email}.`); });
 logoutButton.addEventListener('click', handleLogout);
-document.querySelector('#closeModal').addEventListener('click', closeCheckout);
+document.querySelector('#closeModal').addEventListener('click', () => { closeCheckout(); resetReceiptPreview(); });
+document.querySelector('#closeReceiptModal').addEventListener('click', () => receiptModal.classList.add('hidden'));
+receiptModal.addEventListener('click', event => { if (event.target === receiptModal) receiptModal.classList.add('hidden'); });
 document.querySelector('#closeAuth').addEventListener('click', closeAuth);
+clearReceiptButton.addEventListener('click', resetReceiptPreview);
 document.querySelector('#toggleAuth').addEventListener('click', () => showAuthMode(!isSignUp));
 document.querySelector('#closeAdmin').addEventListener('click', closeAdmin);
 checkoutModal.addEventListener('click', event => { if (event.target === checkoutModal) closeCheckout(); });
@@ -230,24 +313,50 @@ authForm.addEventListener('submit', async event => {
   }
   localStorage.setItem('rally-user', JSON.stringify(currentUser)); updateProfile(); closeAuth();
   await loadBookings();
-  if (selection) showCheckout();
+  if (selection.length) showCheckout();
 });
 document.querySelector('#checkoutForm').addEventListener('submit', async event => {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
+  const proof = formData.get('proof');
+  if (!proof || !proof.name) {
+    showToast('Please upload a payment screenshot before submitting.');
+    return;
+  }
+  const reference = String(formData.get('reference') || '').trim();
+  const proofDataUrl = await readFileAsDataUrl(proof).catch(() => '');
+  const paymentProofPath = `${currentUser.id}/${crypto.randomUUID()}-${proof.name}`;
   if (SUPABASE_CONFIGURED) {
-    const proof = formData.get('proof');
-    const proofPath = `${currentUser.id}/${crypto.randomUUID()}-${proof.name}`;
-    const upload = await supabase.storage.from('payment-proofs').upload(proofPath, proof);
+    const bookingRows = selection.map(slot => ({ user_id: currentUser.id, court_number: slot.courtId, booking_date: selectedDate, start_hour: slot.hour, gcash_reference: reference, payment_proof_path: paymentProofPath, status: 'pending' }));
+    const upload = await supabase.storage.from('payment-proofs').upload(paymentProofPath, proof);
     if (upload.error) { showToast(upload.error.message); return; }
-    const { error } = await supabase.from('bookings').insert({ user_id: currentUser.id, court_number: selection.courtId, booking_date: selectedDate, start_hour: selection.hour, gcash_reference: formData.get('reference'), payment_proof_path: proofPath, status: 'pending' });
+    const { error } = await supabase.from('bookings').insert(bookingRows);
     if (error) { showToast(error.message); return; }
     await loadBookings();
   } else {
-    bookings.push({ id: crypto.randomUUID(), ...selection, date: selectedDate, fullName: formData.get('fullName'), phone: formData.get('phone'), reference: formData.get('reference'), status: 'pending', createdAt: Date.now() });
+    selection.forEach(slot => {
+      bookings.push({ id: crypto.randomUUID(), ...slot, date: selectedDate, fullName: formData.get('fullName'), phone: formData.get('phone'), reference, proofDataUrl, status: 'pending', createdAt: Date.now() });
+    });
     saveBookings(); renderCourts(); renderMyBookings();
   }
-  selection = null; renderSummary(); closeCheckout(); event.currentTarget.reset(); showToast('Booking held. Upload received for review.');
+  selection = []; renderSummary(); closeCheckout(); event.currentTarget.reset(); resetReceiptPreview(); showToast('Booking held. Upload received for review.');
+});
+
+const checkoutProofInput = document.querySelector('#checkoutForm input[name="proof"]');
+checkoutProofInput.addEventListener('change', async event => {
+  const file = event.target.files?.[0];
+  if (!file) {
+    resetReceiptPreview();
+    return;
+  }
+  const previewUrl = await readFileAsDataUrl(file).catch(() => '');
+  if (!previewUrl) {
+    resetReceiptPreview();
+    return;
+  }
+  checkoutReceiptPreview.src = previewUrl;
+  receiptPreviewShell.classList.remove('hidden');
+  checkoutReceiptPreview.alt = `Preview for ${file.name}`;
 });
 
 renderDates();
