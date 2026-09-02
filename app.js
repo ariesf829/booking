@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const USE_SUPABASE_AUTH = false;
+const USE_SUPABASE_AUTH = true;
 const SUPABASE_CONFIGURED = USE_SUPABASE_AUTH && !SUPABASE_URL.includes('your-project') && !SUPABASE_ANON_KEY.includes('your-anon-public-key');
 const HOURS = Array.from({ length: 15 }, (_, index) => index + 7);
 const COURTS = [
