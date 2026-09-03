@@ -91,12 +91,21 @@ function normalizeBooking(booking) {
   return { ...booking, courtId: booking.courtId ?? booking.court_number, hour: booking.hour ?? booking.start_hour, date: booking.date ?? booking.booking_date, createdAt: booking.createdAt ?? new Date(booking.created_at).getTime(), fullName: booking.fullName ?? booking.profiles?.full_name, phone: booking.phone ?? booking.profiles?.phone_number, reference: booking.reference ?? booking.gcash_reference };
 }
 
+async function attachReceiptUrls(bookingList) {
+  if (!SUPABASE_CONFIGURED) return bookingList;
+  return Promise.all(bookingList.map(async booking => {
+    if (!booking.payment_proof_path || booking.proofDataUrl) return booking;
+    const { data, error } = await supabase.storage.from('payment-proofs').createSignedUrl(booking.payment_proof_path, 3600);
+    return error ? booking : { ...booking, proofDataUrl: data?.signedUrl || '' };
+  }));
+}
+
 async function loadBookings() {
   if (!SUPABASE_CONFIGURED || !currentUser) return;
   let query = supabase.from('bookings').select('*, profiles(full_name, phone_number)').order('created_at', { ascending: false });
   const { data, error } = await query;
   if (error) { showToast(error.message); return; }
-  bookings = (data || []).map(normalizeBooking);
+  bookings = await attachReceiptUrls((data || []).map(normalizeBooking));
   renderCourts(); renderMyBookings();
   if (currentUser.role === 'admin' && !adminPanel.classList.contains('hidden')) renderAdmin();
 }
@@ -213,11 +222,17 @@ function openReceiptPreview(bookingId) {
   receiptModal.classList.remove('hidden');
 }
 
+function receiptThumbnail(booking) {
+  if (!booking.proofDataUrl) return '<span class="receipt-missing">No receipt</span>';
+  return `<button class="receipt-thumbnail-button" type="button" data-receipt-id="${booking.id}" aria-label="View payment receipt"><img class="receipt-thumb" src="${booking.proofDataUrl}" alt="Payment receipt thumbnail"></button>`;
+}
+
 function renderAdmin() {
   const pending = bookings.filter(booking => booking.status === 'pending').length;
   const confirmed = bookings.filter(booking => booking.status === 'confirmed').length;
   document.querySelector('#adminStats').innerHTML = `<div><span>Pending review</span><strong>${pending}</strong></div><div><span>Confirmed</span><strong>${confirmed}</strong></div><div><span>Total records</span><strong>${bookings.length}</strong></div>`;
-  document.querySelector('#adminBookingRows').innerHTML = bookings.length ? bookings.slice().sort((a, b) => b.createdAt - a.createdAt).map(booking => { const court = COURTS.find(item => item.id === booking.courtId); const paymentCell = booking.proofDataUrl ? `<div class="receipt-meta"><img class="receipt-thumb" src="${booking.proofDataUrl}" alt="Payment receipt"><small>${booking.reference || 'Proof uploaded'}</small></div>` : `<small>${booking.reference || 'Proof uploaded'}</small>`; return `<tr><td><strong>${booking.fullName || 'Demo customer'}</strong><small>${booking.phone || 'No phone'}</small></td><td>${court?.name || `Court ${booking.courtId}`}<small>${String(booking.hour).padStart(2, '0')}:00 - ${String(booking.hour + 1).padStart(2, '0')}:00</small></td><td>${dateLabel(new Date(`${booking.date}T12:00:00`), { month: 'short', day: 'numeric', year: 'numeric' })}</td><td>${paymentCell}</td><td><span class="status-pill ${booking.status}">${booking.status}</span></td><td><div class="action-stack">${booking.proofDataUrl ? `<button class="table-action preview" data-action="preview" data-id="${booking.id}">Preview</button>` : ''}${booking.status === 'pending' ? `<button class="table-action confirm" data-action="confirmed" data-id="${booking.id}">Confirm</button><button class="table-action cancel" data-action="cancelled" data-id="${booking.id}">Cancel</button>` : '<span class="muted-action">No action</span>'}</div></td></tr>`; }).join('') : '<tr><td colspan="6" class="table-empty">No booking records yet.</td></tr>';
+  document.querySelector('#adminBookingRows').innerHTML = bookings.length ? bookings.slice().sort((a, b) => b.createdAt - a.createdAt).map(booking => { const court = COURTS.find(item => item.id === booking.courtId); return `<tr><td><strong>${booking.fullName || 'Demo customer'}</strong><small>${booking.phone || 'No phone'}</small></td><td>${court?.name || `Court ${booking.courtId}`}<small>${String(booking.hour).padStart(2, '0')}:00 - ${String(booking.hour + 1).padStart(2, '0')}:00</small></td><td>${dateLabel(new Date(`${booking.date}T12:00:00`), { month: 'short', day: 'numeric', year: 'numeric' })}</td><td>${receiptThumbnail(booking)}</td><td><small>${booking.reference || 'Proof uploaded'}</small></td><td><span class="status-pill ${booking.status}">${booking.status}</span></td><td><div class="action-stack">${booking.proofDataUrl ? `<button class="table-action preview" data-action="preview" data-id="${booking.id}">Preview</button>` : ''}${booking.status === 'pending' ? `<button class="table-action confirm" data-action="confirmed" data-id="${booking.id}">Confirm</button><button class="table-action cancel" data-action="cancelled" data-id="${booking.id}">Cancel</button>` : '<span class="muted-action">No action</span>'}</div></td></tr>`; }).join('') : '<tr><td colspan="7" class="table-empty">No booking records yet.</td></tr>';
+  document.querySelectorAll('.receipt-thumbnail-button').forEach(button => button.addEventListener('click', () => openReceiptPreview(button.dataset.receiptId)));
   document.querySelectorAll('.table-action').forEach(button => {
     button.addEventListener('click', async () => {
       const booking = bookings.find(item => item.id === button.dataset.id);
@@ -279,9 +294,10 @@ function renderMyBookings() {
   bookingCard.innerHTML = ownBookings.slice().sort((a, b) => b.createdAt - a.createdAt).map(booking => {
     const court = COURTS.find(item => item.id === booking.courtId);
     const statusLabel = booking.status === 'pending' ? 'PAYMENT PENDING' : booking.status.toUpperCase();
-    const receiptMarkup = booking.proofDataUrl ? `<div class="booking-receipt"><img src="${booking.proofDataUrl}" alt="Payment receipt"><div><span>GCash ref</span><strong>${booking.reference || 'Not provided'}</strong></div></div>` : booking.reference ? `<div class="booking-meta"><span>GCash ref</span><strong>${booking.reference}</strong></div>` : '<div class="booking-meta"><span>GCash ref</span><strong>Pending upload</strong></div>';
+    const receiptMarkup = `<div class="booking-receipt"><div><span>Proof receipt</span>${receiptThumbnail(booking)}</div><div><span>GCash ref</span><strong>${booking.reference || 'Not provided'}</strong></div></div>`;
     return `<div class="booking-item"><div><span class="court-badge">${statusLabel}</span><h3>${court?.name || `Court ${booking.courtId}`} · ${String(booking.hour).padStart(2, '0')}:00</h3><p>${dateLabel(new Date(`${booking.date}T12:00:00`), { weekday: 'long', month: 'short', day: 'numeric' })}</p>${receiptMarkup}</div><strong>₱ ${booking.amount || 350}</strong></div>`;
   }).join('');
+  bookingCard.querySelectorAll('.receipt-thumbnail-button').forEach(button => button.addEventListener('click', () => openReceiptPreview(button.dataset.receiptId)));
 }
 
 continueButton.addEventListener('click', openCheckout);
