@@ -94,7 +94,6 @@ function normalizeBooking(booking) {
 async function loadBookings() {
   if (!SUPABASE_CONFIGURED || !currentUser) return;
   let query = supabase.from('bookings').select('*, profiles(full_name, phone_number)').order('created_at', { ascending: false });
-  if (currentUser.role !== 'admin') query = query.eq('user_id', currentUser.id);
   const { data, error } = await query;
   if (error) { showToast(error.message); return; }
   bookings = (data || []).map(normalizeBooking);
@@ -275,12 +274,14 @@ function resetReceiptPreview() {
 
 function renderMyBookings() {
   pruneExpiredReceipts();
-  const active = bookings.filter(booking => ['pending', 'confirmed'].includes(booking.status)).sort((a, b) => b.createdAt - a.createdAt)[0];
-  if (!active) { bookingCard.innerHTML = '<div class="empty-state"><div class="empty-icon"><i data-lucide="calendar-days"></i></div><div><strong>No active bookings</strong><p>Your upcoming court time will appear here.</p></div></div>'; window.lucide?.createIcons(); return; }
-  const court = COURTS.find(item => item.id === active.courtId);
-  const statusLabel = active.status === 'pending' ? 'PAYMENT PENDING' : 'CONFIRMED';
-  const receiptMarkup = active.proofDataUrl ? `<div class="booking-receipt"><img src="${active.proofDataUrl}" alt="Payment receipt"><div><span>GCash ref</span><strong>${active.reference || 'Not provided'}</strong></div></div>` : active.reference ? `<div class="booking-meta"><span>GCash ref</span><strong>${active.reference}</strong></div>` : '<div class="booking-meta"><span>GCash ref</span><strong>Pending upload</strong></div>';
-  bookingCard.innerHTML = `<div class="booking-item"><div><span class="court-badge">${statusLabel}</span><h3>${court.name} · ${String(active.hour).padStart(2, '0')}:00</h3><p>${dateLabel(new Date(`${active.date}T12:00:00`), { weekday: 'long', month: 'short', day: 'numeric' })}</p>${receiptMarkup}</div><strong>₱ 350</strong></div>`;
+  const ownBookings = currentUser?.role === 'admin' ? bookings : bookings.filter(booking => booking.user_id === currentUser?.id);
+  if (!ownBookings.length) { bookingCard.innerHTML = '<div class="empty-state"><div class="empty-icon"><i data-lucide="calendar-days"></i></div><div><strong>No bookings yet</strong><p>Your court bookings will appear here.</p></div></div>'; window.lucide?.createIcons(); return; }
+  bookingCard.innerHTML = ownBookings.slice().sort((a, b) => b.createdAt - a.createdAt).map(booking => {
+    const court = COURTS.find(item => item.id === booking.courtId);
+    const statusLabel = booking.status === 'pending' ? 'PAYMENT PENDING' : booking.status.toUpperCase();
+    const receiptMarkup = booking.proofDataUrl ? `<div class="booking-receipt"><img src="${booking.proofDataUrl}" alt="Payment receipt"><div><span>GCash ref</span><strong>${booking.reference || 'Not provided'}</strong></div></div>` : booking.reference ? `<div class="booking-meta"><span>GCash ref</span><strong>${booking.reference}</strong></div>` : '<div class="booking-meta"><span>GCash ref</span><strong>Pending upload</strong></div>';
+    return `<div class="booking-item"><div><span class="court-badge">${statusLabel}</span><h3>${court?.name || `Court ${booking.courtId}`} · ${String(booking.hour).padStart(2, '0')}:00</h3><p>${dateLabel(new Date(`${booking.date}T12:00:00`), { weekday: 'long', month: 'short', day: 'numeric' })}</p>${receiptMarkup}</div><strong>₱ ${booking.amount || 350}</strong></div>`;
+  }).join('');
 }
 
 continueButton.addEventListener('click', openCheckout);
@@ -359,9 +360,13 @@ document.querySelector('#checkoutForm').addEventListener('submit', async event =
     return;
   }
   const reference = String(formData.get('reference') || '').trim();
+  const fullName = String(formData.get('fullName') || '').trim();
+  const phone = String(formData.get('phone') || '').trim();
   const proofDataUrl = await readFileAsDataUrl(proof).catch(() => '');
   const paymentProofPath = `${currentUser.id}/${crypto.randomUUID()}-${proof.name}`;
   if (SUPABASE_CONFIGURED) {
+    const { error: profileError } = await supabase.from('profiles').update({ full_name: fullName, phone_number: phone }).eq('id', currentUser.id);
+    if (profileError) { showToast(profileError.message); return; }
     const bookingRows = selection.map(slot => ({ user_id: currentUser.id, court_number: slot.courtId, booking_date: selectedDate, start_hour: slot.hour, gcash_reference: reference, payment_proof_path: paymentProofPath, status: 'pending' }));
     const upload = await supabase.storage.from('payment-proofs').upload(paymentProofPath, proof);
     if (upload.error) { showToast(upload.error.message); return; }
@@ -370,7 +375,7 @@ document.querySelector('#checkoutForm').addEventListener('submit', async event =
     await loadBookings();
   } else {
     selection.forEach(slot => {
-      bookings.push({ id: crypto.randomUUID(), ...slot, date: selectedDate, fullName: formData.get('fullName'), phone: formData.get('phone'), reference, proofDataUrl, status: 'pending', createdAt: Date.now() });
+      bookings.push({ id: crypto.randomUUID(), user_id: currentUser.id || currentUser.email, ...slot, date: selectedDate, fullName, phone, reference, proofDataUrl, status: 'pending', createdAt: Date.now() });
     });
     saveBookings(); renderCourts(); renderMyBookings();
   }

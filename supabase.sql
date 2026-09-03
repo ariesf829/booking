@@ -31,7 +31,8 @@ alter table public.bookings enable row level security;
 
 create policy "Customers can view own profile" on public.profiles for select using (auth.uid() = id);
 create policy "Customers can update own profile" on public.profiles for update using (auth.uid() = id);
-create policy "Customers view own bookings" on public.bookings for select using (auth.uid() = user_id);
+drop policy if exists "Customers view own bookings" on public.bookings;
+create policy "Authenticated users view bookings" on public.bookings for select using (auth.uid() is not null);
 create policy "Customers create own bookings" on public.bookings for insert with check (auth.uid() = user_id);
 create policy "Customers update own pending bookings" on public.bookings for update using (auth.uid() = user_id and status = 'pending');
 
@@ -40,6 +41,7 @@ returns boolean language sql security definer set search_path = public as $$
   select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin');
 $$;
 
+create policy "Admins can view all profiles" on public.profiles for select using (public.is_admin());
 create policy "Admins can view all bookings" on public.bookings for select using (public.is_admin());
 create policy "Admins can update bookings" on public.bookings for update using (public.is_admin()) with check (public.is_admin());
 
