@@ -17,6 +17,7 @@ let selection = [];
 let holdInterval;
 let isSignUp = false;
 let currentUser = JSON.parse(localStorage.getItem('rally-user') || 'null');
+const invalidReceiptPaths = new Set();
 const DEMO_ADMIN = { email: 'admin@rallyreserve.test', password: 'admin123', name: 'Rally Admin', role: 'admin' };
 
 const storedBookings = JSON.parse(localStorage.getItem('rally-bookings') || '[]');
@@ -94,9 +95,14 @@ function normalizeBooking(booking) {
 async function attachReceiptUrls(bookingList) {
   if (!SUPABASE_CONFIGURED) return bookingList;
   return Promise.all(bookingList.map(async booking => {
-    if (!booking.payment_proof_path || booking.proofDataUrl) return booking;
+    const canViewReceipt = currentUser?.role === 'admin' || booking.user_id === currentUser?.id;
+    if (!canViewReceipt || !booking.payment_proof_path || booking.proofDataUrl || invalidReceiptPaths.has(booking.payment_proof_path)) return booking;
     const { data, error } = await supabase.storage.from('payment-proofs').createSignedUrl(booking.payment_proof_path, 3600);
-    return error ? booking : { ...booking, proofDataUrl: data?.signedUrl || '' };
+    if (error || !data?.signedUrl) {
+      invalidReceiptPaths.add(booking.payment_proof_path);
+      return booking;
+    }
+    return { ...booking, proofDataUrl: data.signedUrl };
   }));
 }
 

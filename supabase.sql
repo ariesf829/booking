@@ -77,3 +77,14 @@ $$;
 -- Create a private Storage bucket named `payment-proofs` and restrict uploads
 -- to authenticated users through Storage policies. Confirmation email delivery
 -- belongs in an Edge Function triggered after an admin changes status to confirmed.
+insert into storage.buckets (id, name, public)
+values ('payment-proofs', 'payment-proofs', false)
+on conflict (id) do update set public = excluded.public;
+
+drop policy if exists "Authenticated users can view payment proofs" on storage.objects;
+create policy "Authenticated users can view payment proofs" on storage.objects
+for select to authenticated using (bucket_id = 'payment-proofs' and ((storage.foldername(name))[1] = (select auth.uid()::text) or public.is_admin()));
+
+drop policy if exists "Authenticated users can upload payment proofs" on storage.objects;
+create policy "Authenticated users can upload payment proofs" on storage.objects
+for insert to authenticated with check (bucket_id = 'payment-proofs' and (storage.foldername(name))[1] = (select auth.uid()::text));
