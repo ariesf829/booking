@@ -67,7 +67,7 @@ function renderDates() {
   }).join('');
   dateStrip.querySelectorAll('.date-button').forEach(button => button.addEventListener('click', () => {
     selectedDate = button.dataset.date;
-    selection = null;
+    selection = [];
     renderDates();
     renderCourts();
     renderSummary();
