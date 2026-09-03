@@ -166,7 +166,8 @@ function showAuthMode(signUp) {
 }
 function closeAuth() { authModal.classList.add('hidden'); }
 function updateProfile() {
-  profileButton.textContent = currentUser ? (currentUser.name || currentUser.email).slice(0, 2).toUpperCase() : 'JD';
+  profileButton.textContent = currentUser ? (currentUser.name || currentUser.email).slice(0, 2).toUpperCase() : 'Login/Sign-up';
+  profileButton.classList.toggle('signed-out', !currentUser);
   profileButton.setAttribute('aria-label', currentUser ? 'Open account menu' : 'Sign in');
   logoutButton.classList.toggle('hidden', !currentUser);
 }
@@ -292,7 +293,6 @@ clearReceiptButton.addEventListener('click', resetReceiptPreview);
 document.querySelector('#toggleAuth').addEventListener('click', () => showAuthMode(!isSignUp));
 document.querySelector('#closeAdmin').addEventListener('click', closeAdmin);
 checkoutModal.addEventListener('click', event => { if (event.target === checkoutModal) closeCheckout(); });
-authModal.addEventListener('click', event => { if (event.target === authModal) closeAuth(); });
 authForm.addEventListener('submit', async event => {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
