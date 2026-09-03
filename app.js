@@ -4,6 +4,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const USE_SUPABASE_AUTH = true;
 const SUPABASE_CONFIGURED = USE_SUPABASE_AUTH && !SUPABASE_URL.includes('your-project') && !SUPABASE_ANON_KEY.includes('your-anon-public-key');
+const AUTH_REDIRECT_URL = `${window.location.origin}${window.location.pathname}`;
 const HOURS = Array.from({ length: 15 }, (_, index) => index + 7);
 const COURTS = [
   { id: 1, name: 'Court 1', detail: 'Outdoor · acrylic surface' },
@@ -301,12 +302,19 @@ authForm.addEventListener('submit', async event => {
   if (SUPABASE_CONFIGURED) {
     let result;
     if (isSignUp) {
-      result = await supabase.auth.signUp({ email, password, options: { data: { full_name: email.split('@')[0], phone_number: '' } } });
+      result = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: AUTH_REDIRECT_URL, data: { full_name: email.split('@')[0], phone_number: '' } } });
     } else {
       result = await supabase.auth.signInWithPassword({ email, password });
     }
     if (result.error) { handleAuthError(result.error); return; }
-    currentUser = result.data.user;
+    if (!result.data.session) {
+      currentUser = null;
+      localStorage.removeItem('rally-user');
+      updateProfile();
+      showToast('Check your email to confirm your account, then sign in before booking.');
+      return;
+    }
+    currentUser = result.data.session.user;
     const { data: profile } = await supabase.from('profiles').select('full_name, role').eq('id', currentUser.id).single();
     currentUser.name = profile?.full_name || currentUser.user_metadata?.full_name || email.split('@')[0];
     currentUser.role = profile?.role || 'customer';
@@ -329,6 +337,20 @@ document.querySelector('#checkoutForm').addEventListener('submit', async event =
   if (!currentUser?.id) {
     showToast('Please sign in again before submitting a booking.');
     return;
+  }
+  if (SUPABASE_CONFIGURED) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      currentUser = null;
+      localStorage.removeItem('rally-user');
+      updateProfile();
+      showToast('Your session expired. Please sign in again before submitting.');
+      closeCheckout();
+      showAuthMode(false);
+      authModal.classList.remove('hidden');
+      return;
+    }
+    currentUser = session.user;
   }
   const formData = new FormData(event.currentTarget);
   const proof = formData.get('proof');
