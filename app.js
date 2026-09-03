@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import Panzoom from 'https://esm.sh/@panzoom/panzoom@4.5.1';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -43,10 +44,16 @@ const adminPanel = document.querySelector('#adminPanel');
 const receiptModal = document.querySelector('#receiptModal');
 const receiptPreviewImage = document.querySelector('#receiptPreviewImage');
 const receiptMetaText = document.querySelector('#receiptMetaText');
+const receiptViewport = document.querySelector('#receiptViewport');
+const receiptZoomIn = document.querySelector('#receiptZoomIn');
+const receiptZoomOut = document.querySelector('#receiptZoomOut');
+const receiptZoomReset = document.querySelector('#receiptZoomReset');
 const checkoutReceiptPreview = document.querySelector('#checkoutReceiptPreview');
 const receiptPreviewShell = document.querySelector('#receiptPreviewShell');
 const clearReceiptButton = document.querySelector('#clearReceiptButton');
 const demoHint = document.querySelector('#demoHint');
+const receiptPanzoom = Panzoom(receiptPreviewImage, { maxScale: 5, minScale: 1, step: 0.35, contain: 'outside' });
+receiptViewport.addEventListener('wheel', receiptPanzoom.zoomWithWheel);
 
 function formatDate(date) {
   const year = date.getFullYear();
@@ -224,6 +231,7 @@ function openReceiptPreview(bookingId) {
     return;
   }
   receiptPreviewImage.src = booking.proofDataUrl;
+  receiptPanzoom.reset({ animate: false });
   receiptMetaText.textContent = `${booking.fullName || 'Customer'} · ${booking.reference || 'GCash reference'} · ${dateLabel(new Date(`${booking.date}T12:00:00`), { month: 'short', day: 'numeric', year: 'numeric' })}`;
   receiptModal.classList.remove('hidden');
 }
@@ -312,6 +320,9 @@ logoutButton.addEventListener('click', handleLogout);
 document.querySelector('#closeModal').addEventListener('click', () => { closeCheckout(); resetReceiptPreview(); });
 document.querySelector('#closeReceiptModal').addEventListener('click', () => receiptModal.classList.add('hidden'));
 receiptModal.addEventListener('click', event => { if (event.target === receiptModal) receiptModal.classList.add('hidden'); });
+receiptZoomIn.addEventListener('click', () => receiptPanzoom.zoomIn());
+receiptZoomOut.addEventListener('click', () => receiptPanzoom.zoomOut());
+receiptZoomReset.addEventListener('click', () => receiptPanzoom.reset());
 document.querySelector('#closeAuth').addEventListener('click', closeAuth);
 clearReceiptButton.addEventListener('click', resetReceiptPreview);
 document.querySelector('#toggleAuth').addEventListener('click', () => showAuthMode(!isSignUp));

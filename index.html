@@ -14,8 +14,15 @@
     .receipt-thumbnail-button { display: block; padding: 0; border: 0; background: none; cursor: pointer; }
     .receipt-thumbnail-button .receipt-thumb { display: block; }
     .receipt-missing { display: inline-block; color: var(--muted); font-size: 11px; }
-    .receipt-modal { max-height: 90vh; overflow: auto; }
-    .receipt-modal img { width: auto; max-width: none; max-height: none; touch-action: pinch-zoom; }
+    .receipt-modal { width: min(96vw, 1100px); max-width: 1100px; height: min(94vh, 900px); padding: 20px; display: flex; flex-direction: column; }
+    .receipt-viewer-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .receipt-viewer-header .eyebrow { margin-bottom: 0; }
+    .receipt-zoom-controls { display: flex; gap: 6px; }
+    .receipt-zoom-controls button { min-width: 36px; height: 36px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--white); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+    .receipt-viewport { flex: 1; min-height: 0; margin: 14px 0 12px; overflow: hidden; display: grid; place-items: center; background: var(--sand); border-radius: 12px; touch-action: none; }
+    .receipt-viewport img { display: block; width: auto; max-width: 100%; max-height: 100%; object-fit: contain; -webkit-user-select: none; user-select: none; touch-action: none; cursor: grab; }
+    .receipt-viewport img:active { cursor: grabbing; }
+    .receipt-viewer-meta { margin: 0; }
   </style>
 </head>
 <body>
@@ -52,7 +59,7 @@
 
     <section class="admin-panel hidden" id="adminPanel" aria-labelledby="adminTitle"><div class="admin-header"><div><p class="eyebrow">ADMIN CONSOLE</p><h2 id="adminTitle">Booking desk</h2></div><button class="secondary-button" id="closeAdmin">Back to booking</button></div><div class="admin-stats" id="adminStats"></div><div class="admin-table-wrap"><table><thead><tr><th>Customer</th><th>Court / time</th><th>Date</th><th>Proof receipt</th><th>GCash reference</th><th>Status</th><th>Action</th></tr></thead><tbody id="adminBookingRows"></tbody></table></div></section>
 
-    <div class="modal-backdrop hidden" id="receiptModal" role="dialog" aria-modal="true" aria-labelledby="receiptTitle"><div class="modal receipt-modal"><button class="modal-close" id="closeReceiptModal" aria-label="Close receipt preview"><i data-lucide="x"></i></button><p class="eyebrow">RECEIPT PREVIEW</p><h2 id="receiptTitle">Payment screenshot</h2><img id="receiptPreviewImage" alt="Payment receipt preview"><p class="receipt-meta-text" id="receiptMetaText"></p></div></div>
+    <div class="modal-backdrop hidden" id="receiptModal" role="dialog" aria-modal="true" aria-labelledby="receiptTitle"><div class="modal receipt-modal"><div class="receipt-viewer-header"><div><p class="eyebrow">RECEIPT PREVIEW</p><h2 id="receiptTitle">Payment screenshot</h2></div><div class="receipt-zoom-controls"><button type="button" id="receiptZoomOut" aria-label="Zoom out">−</button><button type="button" id="receiptZoomReset" aria-label="Reset receipt zoom">Reset</button><button type="button" id="receiptZoomIn" aria-label="Zoom in">+</button><button class="modal-close" id="closeReceiptModal" type="button" aria-label="Close receipt preview"><i data-lucide="x"></i></button></div></div><div class="receipt-viewport" id="receiptViewport"><img id="receiptPreviewImage" alt="Payment receipt preview"></div><p class="receipt-meta-text receipt-viewer-meta" id="receiptMetaText"></p></div></div>
 
     <div class="toast hidden" id="toast" role="status"><i data-lucide="check-circle-2"></i><span></span></div>
     <footer><span>© 2026 Rally Reserve</span><span>Made for the love of the game</span></footer>
