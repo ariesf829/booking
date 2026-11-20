@@ -368,7 +368,7 @@ authForm.addEventListener('submit', async event => {
 });
 document.querySelector('#checkoutForm').addEventListener('submit', async event => {
   event.preventDefault();
-  if (!currentUser?.id) {
+  if (!currentUser || (SUPABASE_CONFIGURED && !currentUser.id)) {
     showToast('Please sign in again before submitting a booking.');
     return;
   }
@@ -396,7 +396,7 @@ document.querySelector('#checkoutForm').addEventListener('submit', async event =
   const fullName = String(formData.get('fullName') || '').trim();
   const phone = String(formData.get('phone') || '').trim();
   const proofDataUrl = await readFileAsDataUrl(proof).catch(() => '');
-  const paymentProofPath = `${currentUser.id}/${crypto.randomUUID()}-${proof.name}`;
+  const paymentProofPath = `${currentUser.id || currentUser.email}/${crypto.randomUUID()}-${proof.name}`;
   if (SUPABASE_CONFIGURED) {
     const { error: profileError } = await supabase.from('profiles').update({ full_name: fullName, phone_number: phone }).eq('id', currentUser.id);
     if (profileError) { showToast(profileError.message); return; }

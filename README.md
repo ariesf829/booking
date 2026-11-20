@@ -20,11 +20,13 @@ Click the `JD` avatar, then sign in with `admin@rallyreserve.test` and `admin123
 
 ## Supabase handoff
 
-1. Run `supabase.sql` in the Supabase SQL editor.
-2. Create a private Storage bucket named `payment-proofs` and add authenticated-user upload/read policies.
-3. Connect the UI's booking insert and proof upload to Supabase Auth, Storage, and the `bookings` table.
+1. Copy the Project URL and anon public key from the Supabase project settings into `config.js`.
+2. Run `supabase.sql` in the Supabase SQL editor.
+3. Create a private Storage bucket named `payment-proofs` and add authenticated-user upload/read policies.
 4. Schedule `expire_pending_bookings()` with pg_cron.
 5. Deploy `supabase/functions/confirm-booking/index.ts` with `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `BOOKING_NOTIFICATION_EMAIL` secrets. Invoke it after an admin confirms a booking.
+
+Keep the placeholders in `config.js` when backend services are unavailable. The UI detects them and uses its local demo mode without requesting a nonexistent Supabase hostname.
 
 In Supabase Auth settings, set the Site URL to `https://ariesf829.github.io/booking/` and add that same URL under Redirect URLs. Email sign-up passes the current page URL as `emailRedirectTo`, so add `http://localhost:4173/` there too for local testing.
 
