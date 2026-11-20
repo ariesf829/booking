@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import { createUserWithEmailAndPassword, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
-import { collection, doc, getDoc, getDocs, getFirestore, query, runTransaction, serverTimestamp, setDoc, where } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import { collection, doc, getDoc, getDocs, getFirestore, query, runTransaction, serverTimestamp, setDoc, updateDoc, where } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytes } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js';
 import Panzoom from 'https://esm.sh/@panzoom/panzoom@4.5.1';
 import { FIREBASE_CONFIG } from './config.js';
@@ -429,12 +429,20 @@ document.querySelector('#checkoutForm').addEventListener('submit', async event =
   const fullName = String(formData.get('fullName') || '').trim();
   const phone = String(formData.get('phone') || '').trim();
   const proofDataUrl = await readFileAsDataUrl(proof).catch(() => '');
-  const paymentProofPath = `${currentUser.id || currentUser.email}/${crypto.randomUUID()}-${proof.name}`;
+  const paymentProofPath = `payment-proofs/${currentUser.id || currentUser.email}/${crypto.randomUUID()}-${proof.name}`;
   if (FIREBASE_CONFIGURED) {
     const receiptRef = ref(firebaseStorage, paymentProofPath);
+    let receiptUploaded = false;
     try {
-      await setDoc(doc(firestore, 'profiles', currentUser.id), { name: fullName, phone }, { merge: true });
+      const profileRef = doc(firestore, 'profiles', currentUser.id);
+      const profile = await getDoc(profileRef);
+      if (profile.exists()) {
+        await updateDoc(profileRef, { name: fullName, phone });
+      } else {
+        await setDoc(profileRef, { name: fullName, phone, role: 'customer' });
+      }
       await uploadBytes(receiptRef, proof, { contentType: proof.type });
+      receiptUploaded = true;
       await runTransaction(firestore, async transaction => {
         const bookingRefs = selection.map(() => doc(collection(firestore, 'bookings')));
         const occupiedSlotRefs = selection.map(slot => doc(firestore, 'occupiedSlots', `${selectedDate}_${slot.courtId}_${slot.hour}`));
@@ -449,7 +457,11 @@ document.querySelector('#checkoutForm').addEventListener('submit', async event =
       });
       await loadBookings();
     } catch (error) {
-      await deleteObject(receiptRef).catch(() => {});
+      if (receiptUploaded) {
+        await deleteObject(receiptRef).catch(cleanupError => {
+          console.warn('Unable to remove uploaded receipt after booking failure.', cleanupError);
+        });
+      }
       handleBookingError(error);
       return;
     }
