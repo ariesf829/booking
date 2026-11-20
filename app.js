@@ -1,11 +1,15 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import { createUserWithEmailAndPassword, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import { collection, doc, getDoc, getDocs, getFirestore, query, runTransaction, serverTimestamp, setDoc, where } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import { deleteObject, getDownloadURL, getStorage, ref, uploadBytes } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js';
 import Panzoom from 'https://esm.sh/@panzoom/panzoom@4.5.1';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+import { FIREBASE_CONFIG } from './config.js';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const USE_SUPABASE_AUTH = true;
-const SUPABASE_CONFIGURED = USE_SUPABASE_AUTH && !SUPABASE_URL.includes('your-project') && !SUPABASE_ANON_KEY.includes('your-anon-public-key');
-const AUTH_REDIRECT_URL = `${window.location.origin}${window.location.pathname}`;
+const FIREBASE_CONFIGURED = !Object.values(FIREBASE_CONFIG).some(value => value.startsWith('your-'));
+const firebaseApp = FIREBASE_CONFIGURED ? initializeApp(FIREBASE_CONFIG) : null;
+const firebaseAuth = firebaseApp ? getAuth(firebaseApp) : null;
+const firestore = firebaseApp ? getFirestore(firebaseApp) : null;
+const firebaseStorage = firebaseApp ? getStorage(firebaseApp) : null;
 const HOURS = Array.from({ length: 15 }, (_, index) => index + 7);
 const COURTS = [
   { id: 1, name: 'Court 1', detail: 'Outdoor · acrylic surface' },
@@ -18,6 +22,7 @@ let selection = [];
 let holdInterval;
 let isSignUp = false;
 let currentUser = JSON.parse(localStorage.getItem('rally-user') || 'null');
+let occupiedSlots = [];
 const invalidReceiptPaths = new Set();
 const DEMO_ADMIN = { email: 'admin@rallyreserve.test', password: 'admin123', name: 'Rally Admin', role: 'admin' };
 
@@ -92,35 +97,52 @@ function isSelectedSlot(courtId, hour) {
 
 function isUnavailable(courtId, hour) {
   const selectedKeys = new Set(selection.map(item => slotKey(item.courtId, item.hour)));
-  return bookings.some(booking => booking.date === selectedDate && booking.courtId === courtId && booking.hour === hour && ['pending', 'confirmed'].includes(booking.status) && !selectedKeys.has(slotKey(courtId, hour)));
+  const backendUnavailable = occupiedSlots.some(slot => slot.date === selectedDate && slot.courtId === courtId && slot.hour === hour);
+  const localUnavailable = bookings.some(booking => booking.date === selectedDate && booking.courtId === courtId && booking.hour === hour && ['pending', 'confirmed'].includes(booking.status));
+  return (backendUnavailable || localUnavailable) && !selectedKeys.has(slotKey(courtId, hour));
 }
 
 function normalizeBooking(booking) {
-  return { ...booking, courtId: booking.courtId ?? booking.court_number, hour: booking.hour ?? booking.start_hour, date: booking.date ?? booking.booking_date, createdAt: booking.createdAt ?? new Date(booking.created_at).getTime(), fullName: booking.fullName ?? booking.profiles?.full_name, phone: booking.phone ?? booking.profiles?.phone_number, reference: booking.reference ?? booking.gcash_reference };
+  const createdAt = booking.createdAt?.toMillis?.() ?? booking.createdAt ?? Date.now();
+  return { ...booking, courtId: booking.courtId, hour: booking.hour, date: booking.date, createdAt, fullName: booking.fullName, phone: booking.phone, reference: booking.reference };
 }
 
 async function attachReceiptUrls(bookingList) {
-  if (!SUPABASE_CONFIGURED) return bookingList;
+  if (!FIREBASE_CONFIGURED) return bookingList;
   return Promise.all(bookingList.map(async booking => {
     const canViewReceipt = currentUser?.role === 'admin' || booking.user_id === currentUser?.id;
     if (!canViewReceipt || !booking.payment_proof_path || booking.proofDataUrl || invalidReceiptPaths.has(booking.payment_proof_path)) return booking;
-    const { data, error } = await supabase.storage.from('payment-proofs').createSignedUrl(booking.payment_proof_path, 3600);
-    if (error || !data?.signedUrl) {
+    try {
+      return { ...booking, proofDataUrl: await getDownloadURL(ref(firebaseStorage, booking.payment_proof_path)) };
+    } catch {
       invalidReceiptPaths.add(booking.payment_proof_path);
       return booking;
     }
-    return { ...booking, proofDataUrl: data.signedUrl };
   }));
 }
 
 async function loadBookings() {
-  if (!SUPABASE_CONFIGURED || !currentUser) return;
-  let query = supabase.from('bookings').select('*, profiles(full_name, phone_number)').order('created_at', { ascending: false });
-  const { data, error } = await query;
-  if (error) { showToast(error.message); return; }
-  bookings = await attachReceiptUrls((data || []).map(normalizeBooking));
-  renderCourts(); renderMyBookings();
-  if (currentUser.role === 'admin' && !adminPanel.classList.contains('hidden')) renderAdmin();
+  if (!FIREBASE_CONFIGURED) return;
+  try {
+    const slotSnapshot = await getDocs(collection(firestore, 'occupiedSlots'));
+    occupiedSlots = slotSnapshot.docs.map(item => item.data());
+    if (!currentUser) {
+      bookings = [];
+      renderCourts();
+      renderMyBookings();
+      return;
+    }
+    const bookingsRef = collection(firestore, 'bookings');
+    const bookingQuery = currentUser.role === 'admin'
+      ? query(bookingsRef)
+      : query(bookingsRef, where('user_id', '==', currentUser.id));
+    const snapshot = await getDocs(bookingQuery);
+    bookings = await attachReceiptUrls(snapshot.docs.map(item => normalizeBooking({ id: item.id, ...item.data() })));
+    renderCourts(); renderMyBookings();
+    if (currentUser.role === 'admin' && !adminPanel.classList.contains('hidden')) renderAdmin();
+  } catch (error) {
+    showToast(error.message || 'Unable to load bookings.');
+  }
 }
 
 function renderCourts() {
@@ -194,8 +216,8 @@ function updateProfile() {
   logoutButton.classList.toggle('hidden', !currentUser);
 }
 function handleLogout() {
-  if (SUPABASE_CONFIGURED) {
-    supabase.auth.signOut().catch(() => {});
+  if (FIREBASE_CONFIGURED) {
+    signOut(firebaseAuth).catch(error => showToast(error.message));
   }
   currentUser = null;
   localStorage.removeItem('rally-user');
@@ -255,7 +277,22 @@ function renderAdmin() {
         openReceiptPreview(booking.id);
         return;
       }
-      if (SUPABASE_CONFIGURED) { const { error } = await supabase.from('bookings').update({ status: button.dataset.action, ...(button.dataset.action === 'confirmed' ? { confirmed_at: new Date().toISOString() } : {}) }).eq('id', booking.id); if (error) { showToast(error.message); return; } await loadBookings(); } else { booking.status = button.dataset.action; saveBookings(); renderAdmin(); renderCourts(); renderMyBookings(); } showToast(`Booking ${button.dataset.action}.`); });
+      if (FIREBASE_CONFIGURED) {
+        try {
+          await runTransaction(firestore, async transaction => {
+            transaction.update(doc(firestore, 'bookings', booking.id), { status: button.dataset.action, ...(button.dataset.action === 'confirmed' ? { confirmedAt: serverTimestamp() } : {}) });
+            if (button.dataset.action === 'cancelled') {
+              transaction.delete(doc(firestore, 'occupiedSlots', `${booking.date}_${booking.courtId}_${booking.hour}`));
+            }
+          });
+          await loadBookings();
+        } catch (error) {
+          handleBookingError(error);
+          return;
+        }
+      } else { booking.status = button.dataset.action; saveBookings(); renderAdmin(); renderCourts(); renderMyBookings(); }
+      showToast(`Booking ${button.dataset.action}.`);
+    });
   });
 }
 function saveBookings() { localStorage.setItem('rally-bookings', JSON.stringify(bookings)); }
@@ -278,7 +315,7 @@ function handleAuthError(error) {
     showToast('Email rate limit reached. Please wait a few minutes and try again, or use the demo admin login.');
     return;
   }
-  if (normalized.includes('user already registered')) {
+  if (normalized.includes('user already registered') || error?.code === 'auth/email-already-in-use') {
     showToast('This email is already registered. Please sign in instead.');
     return;
   }
@@ -287,8 +324,8 @@ function handleAuthError(error) {
 
 function handleBookingError(error) {
   const message = error?.message || 'Unable to submit booking.';
-  if (message.toLowerCase().includes('row-level security') || message.toLowerCase().includes('policy')) {
-    showToast('Supabase blocked the booking because the logged-in user is not allowed to insert into bookings. Check the auth session and the bookings insert policy.');
+  if (message.toLowerCase().includes('permission') || error?.code === 'permission-denied') {
+    showToast('Firebase blocked this action. Check the Firestore and Storage security rules.');
     return;
   }
   showToast(message);
@@ -303,7 +340,8 @@ function resetReceiptPreview() {
 
 function renderMyBookings() {
   pruneExpiredReceipts();
-  const ownBookings = currentUser?.role === 'admin' ? bookings : bookings.filter(booking => booking.user_id === currentUser?.id);
+  const currentUserId = currentUser?.id || currentUser?.email;
+  const ownBookings = currentUser?.role === 'admin' ? bookings : bookings.filter(booking => booking.user_id === currentUserId);
   if (!ownBookings.length) { bookingCard.innerHTML = '<div class="empty-state"><div class="empty-icon"><i data-lucide="calendar-days"></i></div><div><strong>No bookings yet</strong><p>Your court bookings will appear here.</p></div></div>'; window.lucide?.createIcons(); return; }
   bookingCard.innerHTML = ownBookings.slice().sort((a, b) => b.createdAt - a.createdAt).map(booking => {
     const court = COURTS.find(item => item.id === booking.courtId);
@@ -333,25 +371,21 @@ authForm.addEventListener('submit', async event => {
   const formData = new FormData(event.currentTarget);
   const email = formData.get('email').toLowerCase();
   const password = formData.get('password');
-  if (SUPABASE_CONFIGURED) {
-    let result;
-    if (isSignUp) {
-      result = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: AUTH_REDIRECT_URL, data: { full_name: email.split('@')[0], phone_number: '' } } });
-    } else {
-      result = await supabase.auth.signInWithPassword({ email, password });
-    }
-    if (result.error) { handleAuthError(result.error); return; }
-    if (!result.data.session) {
-      currentUser = null;
-      localStorage.removeItem('rally-user');
-      updateProfile();
-      showToast('Check your email to confirm your account, then sign in before booking.');
+  if (FIREBASE_CONFIGURED) {
+    try {
+      const credential = isSignUp
+        ? await createUserWithEmailAndPassword(firebaseAuth, email, password)
+        : await signInWithEmailAndPassword(firebaseAuth, email, password);
+      const profileRef = doc(firestore, 'profiles', credential.user.uid);
+      if (isSignUp) {
+        await setDoc(profileRef, { name: email.split('@')[0], phone: '', role: 'customer' });
+      }
+      const profile = await getDoc(profileRef);
+      currentUser = { id: credential.user.uid, uid: credential.user.uid, email: credential.user.email, name: profile.data()?.name || email.split('@')[0], role: profile.data()?.role || 'customer' };
+    } catch (error) {
+      handleAuthError(error);
       return;
     }
-    currentUser = result.data.session.user;
-    const { data: profile } = await supabase.from('profiles').select('full_name, role').eq('id', currentUser.id).single();
-    currentUser.name = profile?.full_name || currentUser.user_metadata?.full_name || email.split('@')[0];
-    currentUser.role = profile?.role || 'customer';
   } else if (isSignUp) {
     currentUser = { email, name: email.split('@')[0], role: 'customer' };
     showToast('Account created. You are signed in.');
@@ -368,13 +402,12 @@ authForm.addEventListener('submit', async event => {
 });
 document.querySelector('#checkoutForm').addEventListener('submit', async event => {
   event.preventDefault();
-  if (!currentUser || (SUPABASE_CONFIGURED && !currentUser.id)) {
+  if (!currentUser || (FIREBASE_CONFIGURED && !currentUser.id)) {
     showToast('Please sign in again before submitting a booking.');
     return;
   }
-  if (SUPABASE_CONFIGURED) {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
+  if (FIREBASE_CONFIGURED) {
+    if (!firebaseAuth.currentUser) {
       currentUser = null;
       localStorage.removeItem('rally-user');
       updateProfile();
@@ -384,7 +417,7 @@ document.querySelector('#checkoutForm').addEventListener('submit', async event =
       authModal.classList.remove('hidden');
       return;
     }
-    currentUser = session.user;
+    currentUser.id = firebaseAuth.currentUser.uid;
   }
   const formData = new FormData(event.currentTarget);
   const proof = formData.get('proof');
@@ -397,15 +430,29 @@ document.querySelector('#checkoutForm').addEventListener('submit', async event =
   const phone = String(formData.get('phone') || '').trim();
   const proofDataUrl = await readFileAsDataUrl(proof).catch(() => '');
   const paymentProofPath = `${currentUser.id || currentUser.email}/${crypto.randomUUID()}-${proof.name}`;
-  if (SUPABASE_CONFIGURED) {
-    const { error: profileError } = await supabase.from('profiles').update({ full_name: fullName, phone_number: phone }).eq('id', currentUser.id);
-    if (profileError) { showToast(profileError.message); return; }
-    const bookingRows = selection.map(slot => ({ user_id: currentUser.id, court_number: slot.courtId, booking_date: selectedDate, start_hour: slot.hour, gcash_reference: reference, payment_proof_path: paymentProofPath, status: 'pending' }));
-    const upload = await supabase.storage.from('payment-proofs').upload(paymentProofPath, proof);
-    if (upload.error) { showToast(upload.error.message); return; }
-    const { error } = await supabase.from('bookings').insert(bookingRows);
-    if (error) { handleBookingError(error); return; }
-    await loadBookings();
+  if (FIREBASE_CONFIGURED) {
+    const receiptRef = ref(firebaseStorage, paymentProofPath);
+    try {
+      await setDoc(doc(firestore, 'profiles', currentUser.id), { name: fullName, phone }, { merge: true });
+      await uploadBytes(receiptRef, proof, { contentType: proof.type });
+      await runTransaction(firestore, async transaction => {
+        const bookingRefs = selection.map(() => doc(collection(firestore, 'bookings')));
+        const occupiedSlotRefs = selection.map(slot => doc(firestore, 'occupiedSlots', `${selectedDate}_${slot.courtId}_${slot.hour}`));
+        selection.forEach((slot, index) => transaction.set(bookingRefs[index], {
+          user_id: currentUser.id, courtId: slot.courtId, date: selectedDate, hour: slot.hour,
+          amount: BOOKING_RATE, status: 'pending', reference, payment_proof_path: paymentProofPath,
+          fullName, phone, createdAt: serverTimestamp()
+        }));
+        selection.forEach((slot, index) => transaction.set(occupiedSlotRefs[index], {
+          date: selectedDate, courtId: slot.courtId, hour: slot.hour, bookingId: bookingRefs[index].id
+        }));
+      });
+      await loadBookings();
+    } catch (error) {
+      await deleteObject(receiptRef).catch(() => {});
+      handleBookingError(error);
+      return;
+    }
   } else {
     selection.forEach(slot => {
       bookings.push({ id: crypto.randomUUID(), user_id: currentUser.id || currentUser.email, ...slot, date: selectedDate, fullName, phone, reference, proofDataUrl, status: 'pending', createdAt: Date.now() });
@@ -440,26 +487,19 @@ updateProfile();
 window.lucide?.createIcons();
 
 async function initializeAuth() {
-  if (!SUPABASE_CONFIGURED) return;
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session?.user) {
-    currentUser = session.user;
-    const { data: profile } = await supabase.from('profiles').select('full_name, role').eq('id', currentUser.id).single();
-    currentUser.name = profile?.full_name || currentUser.email;
-    currentUser.role = profile?.role || 'customer';
-    updateProfile();
-    await loadBookings();
-  } else {
-    currentUser = null;
-    localStorage.removeItem('rally-user');
-    bookings = [];
-    updateProfile();
-    renderCourts();
-    renderMyBookings();
-  }
-  supabase.auth.onAuthStateChange((_event, sessionChange) => {
-    currentUser = sessionChange?.user || null;
-    if (!currentUser) { bookings = []; renderCourts(); renderMyBookings(); }
+  if (!FIREBASE_CONFIGURED) return;
+  onAuthStateChanged(firebaseAuth, async user => {
+    if (user) {
+      const profile = await getDoc(doc(firestore, 'profiles', user.uid));
+      currentUser = { id: user.uid, uid: user.uid, email: user.email, name: profile.data()?.name || user.email, role: profile.data()?.role || 'customer' };
+      localStorage.setItem('rally-user', JSON.stringify(currentUser));
+      await loadBookings();
+    } else {
+      currentUser = null;
+      localStorage.removeItem('rally-user');
+      bookings = [];
+      await loadBookings();
+    }
     updateProfile();
   });
 }
